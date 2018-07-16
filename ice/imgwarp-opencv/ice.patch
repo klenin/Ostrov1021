@@ -1,0 +1,1841 @@
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 4a82d2b..39420b3 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -1,3 +1,5 @@
++cmake_minimum_required(VERSION 2.6)
++
+ PROJECT( imgwarp-opencv )
+ FIND_PACKAGE( OpenCV REQUIRED )
+ 
+diff --git a/src/demo/CMakeLists.txt b/src/demo/CMakeLists.txt
+index 1091545..0862d68 100644
+--- a/src/demo/CMakeLists.txt
++++ b/src/demo/CMakeLists.txt
+@@ -1,14 +1,11 @@
+-project(demo)
+ cmake_minimum_required(VERSION 2.6)
+-find_package(Qt4 REQUIRED)
++project(demo)
+ FIND_PACKAGE( OpenCV REQUIRED )
+ 
++set(CMAKE_CXX_STANDARD 11)
+ 
+-include_directories(${QT_INCLUDES} ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_SOURCE_DIR}/lib ${CMAKE_CURRENT_SOURCE_DIR})
++include_directories(${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_SOURCE_DIR}/lib ${CMAKE_CURRENT_SOURCE_DIR})
+ 
+-set(demo_SRCS main.cpp projfile.cpp deformwin.cpp myimage.cpp singlephotoview.cpp pointspaint.cpp)
+-qt4_automoc(${demo_SRCS})
+-QT4_WRAP_CPP(QOBJ_CPP ${demo_SRCS})
+-qt4_wrap_ui(helloworld_FORMS_HEADERS deformwin.ui)
++set(demo_SRCS main.cpp)
+ add_executable(demo ${demo_SRCS} ${helloworld_FORMS_HEADERS})
+-target_link_libraries(demo ${QT_QTCORE_LIBRARY} ${QT_QTGUI_LIBRARY} imgwarp-lib ${OpenCV_LIBS})
++target_link_libraries(demo imgwarp-lib ${OpenCV_LIBS})
+diff --git a/src/demo/deformwin.cpp b/src/demo/deformwin.cpp
+deleted file mode 100644
+index 360792d..0000000
+--- a/src/demo/deformwin.cpp
++++ /dev/null
+@@ -1,228 +0,0 @@
+-#include "deformwin.h"
+-#include "ui_deformwin.h"
+-
+-#include "imgwarp_piecewiseaffine.h"
+-#include "imgwarp_mls_rigid.h"
+-#include "imgwarp_mls_similarity.h"
+-#include "highgui.h"
+-
+-#include <QString>
+-#include <QFileDialog>
+-
+-using cv::imread;
+-
+-DeformWin::DeformWin(QWidget *parent) :
+-    QMainWindow(parent),
+-    ui(new Ui::DeformWin)
+-{
+-    ui->setupUi(this);
+-    scene = NULL;
+-}
+-
+-DeformWin::~DeformWin()
+-{
+-    delete ui;
+-}
+-
+-void DeformWin::changeEvent(QEvent *e)
+-{
+-    QMainWindow::changeEvent(e);
+-    switch (e->type()) {
+-    case QEvent::LanguageChange:
+-        ui->retranslateUi(this);
+-        break;
+-    default:
+-        break;
+-    }
+-}
+-
+-void DeformWin::on_pushButton_clicked()
+-{
+-    ui->tabMain->setCurrentWidget(ui->tabView);
+-	calcWarpedImg();
+-    MyImage mNew = MyImage::fromMat(curImg);
+-
+-    if (scene != NULL){
+-        delete scene;
+-        scene = NULL;
+-    }
+-    scene = new QGraphicsScene();
+-
+-    qDebug("New Image generated.");
+-    scene->addPixmap(QPixmap::fromImage(mNew));
+-    ui->graphShow->setScene(scene);
+-    ui->graphShow->fitInView(0, 0, oriImg.cols, oriImg.rows,
+-							 Qt::KeepAspectRatio);
+-}
+-
+-void DeformWin::updateEditImg()
+-{
+-	if (oriImg.cols == 0)
+-		return;
+-    // Check if preview is available
+-    if (ui->viewPointEdit->srcPointPaint.getPointList().length() !=
+-        ui->viewPointEdit->dstPointPaint.getPointList().length()){
+-        //ui->chkPreview->setChecked(false);
+-        ui->chkPreview->setEnabled(false);
+-    }
+-    else {
+-        ui->chkPreview->setEnabled(true);
+-    }
+-    // Check if "preview" is checked
+-    if (!ui->chkPreview->isChecked()){
+-        ui->viewPointEdit->setImage(pFile.picSrc);
+-        return;
+-    }
+-    calcWarpedImg();
+-
+-    qDebug("New Image generated.");
+-    MyImage mN = MyImage::fusionTwoImages(MyImage::fromMat(oriImg),
+-		MyImage::fromMat(curImg), ui->SldOpacity->value()/100.0);
+-    ui->viewPointEdit->setImage(QPixmap::fromImage(mN));
+-
+-}
+-
+-bool DeformWin::calcWarpedImg(){
+-	if (ui->viewPointEdit->srcPointPaint.getPointList().length() !=
+-        ui->viewPointEdit->dstPointPaint.getPointList().length()){
+-		curImg = oriImg;
+-		return false;
+-	}
+-
+-    ImgWarp_MLS *imgTrans;
+-    if (ui->cmbDeformAlg->currentText()==QString("MLS Similarity")){
+-        imgTrans = new ImgWarp_MLS_Similarity();
+-        imgTrans->alpha = ui->spinAlpha->value();
+-        imgTrans->gridSize = ui->SldGrid->value();
+-    }
+-    else if (ui->cmbDeformAlg->currentText()==QString("MLS Rigid")){
+-        imgTrans = new ImgWarp_MLS_Rigid();
+-        imgTrans->alpha = ui->spinAlpha->value();
+-        imgTrans->gridSize = ui->SldGrid->value();
+-    }
+-    else if (ui->cmbDeformAlg->currentText()==QString("Piecewise Affine")){
+-        imgTrans = new ImgWarp_PieceWiseAffine();
+-        imgTrans->alpha = ui->spinAlpha->value();
+-        imgTrans->gridSize = ui->SldGrid->value();
+-		((ImgWarp_PieceWiseAffine *)imgTrans)->backGroundFillAlg = ImgWarp_PieceWiseAffine::BGMLS;
+-//         imgTrans = new ImgTrans_MLS_Affine();
+-//         imgTrans->alpha = ui->spinAlpha->value();
+-//         imgTrans->gridSize = ui->SldGrid->value();
+-    }
+-    else {
+-//         imgTrans = new ImgTrans_MLS_Affine();
+-//         imgTrans->alpha = ui->spinAlpha->value();
+-//         imgTrans->gridSize = ui->SldGrid->value();
+-    }
+-
+-    //imgTrans->setTargetSize(oriImg.cols, oriImg.rows);
+-    //imgTrans->setSize(oriImg.cols, oriImg.rows);
+-    //imgTrans->setSrcPoints(getVcvPoint(ui->viewPointEdit->srcPointPaint.getPointList()));
+-    //imgTrans->setDstPoints(getVcvPoint(ui->viewPointEdit->dstPointPaint.getPointList()));
+-////    imgTrans->alpha = 1;
+-////    imgTrans->gridSize = 10;
+-
+-    //imgTrans->calcDelta();
+-	//curImg = imgTrans->genNewImg(oriImg, 1);
+-	curImg = imgTrans->setAllAndGenerate(
+-			oriImg,
+-		   	getVcvPoint(ui->viewPointEdit->srcPointPaint.getPointList()),
+-			getVcvPoint(ui->viewPointEdit->dstPointPaint.getPointList()),
+-			oriImg.cols, oriImg.rows, 1);
+-    delete imgTrans;
+-	return true;
+-}
+-
+-
+-
+-void DeformWin::prepare()
+-{
+-    ui->viewPointEdit->setPointList(this->qDotSrc, qDotDst);
+-    ui->viewPointEdit->setImage(this->pFile.picSrc);
+-}
+-
+-void DeformWin::on_actCpSrcPtToDst_triggered()
+-{
+-    ui->viewPointEdit->copySrcPointsToDst();
+-}
+-
+-void DeformWin::on_actClearAllPt_triggered()
+-{
+-    ui->viewPointEdit->clearAllPoints();
+-}
+-
+-void DeformWin::on_actNewProj_triggered()
+-{
+-    QString fileName;
+-    fileName = QFileDialog::getOpenFileName(
+-        this, tr("Open Image"), "./",
+-        tr("Image Files (*.jpg *.gif *.png);;All Files (*.*)"));
+-    ui->viewPointEdit->setImage(fileName);
+-    ui->viewPointEdit->clearAllPoints();
+-    pFile.picSrc = fileName;
+-    this->oriImg = imread(pFile.picSrc.toStdString());
+-}
+-
+-void DeformWin::on_actOpenProj_triggered()
+-{
+-    QString fileName;
+-    fileName = QFileDialog::getOpenFileName(
+-        this, tr("Open Project"), "./",
+-        tr("Project Files (*.prj);;All Files (*.*)"));
+-        qDebug("HERE\n");
+-    pFile.open(fileName);
+-
+-    ui->viewPointEdit->setImage(pFile.picSrc);
+-    this->oriImg = imread(pFile.picSrc.toStdString());
+-    ui->viewPointEdit->setPointList(pFile.qlSrc, pFile.qlDest);
+-}
+-
+-void DeformWin::on_actSaveProj_triggered()
+-{
+-    if (pFile.fileName == ""){
+-        pFile.fileName = QFileDialog::getSaveFileName(
+-            this, tr("Save Project..."), "./",
+-            tr("Project Files (*.prj);;All Files (*.*)"));
+-        qDebug(pFile.fileName.toStdString().c_str());
+-        if (!pFile.fileName.endsWith(".prj"))
+-            pFile.fileName.append(".prj");
+-    }
+-    pFile.qlSrc = ui->viewPointEdit->srcPointPaint.getPointList();
+-    pFile.qlDest = ui->viewPointEdit->dstPointPaint.getPointList();
+-    pFile.save();
+-}
+-
+-void DeformWin::on_actSaveProjAs_triggered()
+-{
+-    pFile.fileName = QFileDialog::getSaveFileName(
+-        this, tr("Save Project..."), "./",
+-        tr("Project Files (*.prj);;All Files (*.*)"));
+-    qDebug(pFile.fileName.toStdString().c_str());
+-    if (!pFile.fileName.endsWith(".prj"))
+-        pFile.fileName.append(".prj");
+-    pFile.qlSrc = ui->viewPointEdit->srcPointPaint.getPointList();
+-    pFile.qlDest = ui->viewPointEdit->dstPointPaint.getPointList();
+-    pFile.save();
+-}
+-
+-void DeformWin::on_actExportPic_triggered()
+-{
+-	if (!calcWarpedImg()){
+-		// TODO: show some hint here.
+-		return;
+-	}
+-
+-    QString filename;
+-    filename = QFileDialog::getSaveFileName(this,
+-        tr("Export Picture..."), "./", tr("PNG Files (*.png);;All Files (*.*)"));
+-    qDebug(filename.toStdString().c_str());
+-    if (!filename.endsWith(".png"))
+-        filename.append(".png");
+-	cv::imwrite(filename.toStdString(), curImg);
+-}
+-
+-void DeformWin::on_actExit_triggered(){
+-	QApplication::exit(0);
+-}
+-
+-#include "deformwin.moc"
+diff --git a/src/demo/deformwin.h b/src/demo/deformwin.h
+deleted file mode 100644
+index 472c93b..0000000
+--- a/src/demo/deformwin.h
++++ /dev/null
+@@ -1,61 +0,0 @@
+-#ifndef DEFORMWIN_H
+-#define DEFORMWIN_H
+-
+-#include <QMainWindow>
+-
+-#include<QGraphicsScene>
+-
+-#include "imgwarp_mls.h"
+-#include "myimage.h"
+-#include "projfile.h"
+-
+-namespace Ui {
+-    class DeformWin;
+-}
+-
+-class DeformWin : public QMainWindow {
+-    Q_OBJECT
+-public:
+-    DeformWin(QWidget *parent = 0);
+-    ~DeformWin();
+-
+-    void prepare();
+-
+-    QList< QPoint > qDotSrc, qDotDst;
+-    QString srcFile;
+-
+-public slots:
+-    void updateEditImg();
+-
+-protected:
+-    void changeEvent(QEvent *e);
+-
+-private:
+-    Ui::DeformWin *ui;
+-
+-    ProjFile pFile;
+-
+-    QGraphicsScene *scene;
+-    
+-    //! The original image
+-    Mat oriImg;
+-    
+-    //! The current warped image
+-    Mat curImg;
+-    
+-    //! Get the warped image
+-    bool calcWarpedImg();
+-
+-private slots:
+-    void on_actExportPic_triggered();
+-    void on_actSaveProjAs_triggered();
+-    void on_actSaveProj_triggered();
+-    void on_actOpenProj_triggered();
+-    void on_actNewProj_triggered();
+-    void on_actClearAllPt_triggered();
+-    void on_actCpSrcPtToDst_triggered();
+-    void on_actExit_triggered();
+-    void on_pushButton_clicked();
+-};
+-
+-#endif // DEFORMWIN_H
+diff --git a/src/demo/deformwin.ui b/src/demo/deformwin.ui
+deleted file mode 100644
+index 7170477..0000000
+--- a/src/demo/deformwin.ui
++++ /dev/null
+@@ -1,502 +0,0 @@
+-<?xml version="1.0" encoding="UTF-8"?>
+-<ui version="4.0">
+- <class>DeformWin</class>
+- <widget class="QMainWindow" name="DeformWin">
+-  <property name="geometry">
+-   <rect>
+-    <x>0</x>
+-    <y>0</y>
+-    <width>666</width>
+-    <height>389</height>
+-   </rect>
+-  </property>
+-  <property name="windowTitle">
+-   <string>Image Deformation Demo</string>
+-  </property>
+-  <widget class="QWidget" name="centralwidget">
+-   <layout class="QGridLayout" name="gridLayout_2">
+-    <item row="0" column="0" rowspan="2">
+-     <widget class="QTabWidget" name="tabMain">
+-      <property name="currentIndex">
+-       <number>0</number>
+-      </property>
+-      <widget class="QWidget" name="tabEdit">
+-       <attribute name="title">
+-        <string>Edit</string>
+-       </attribute>
+-       <layout class="QGridLayout" name="gridLayout_3">
+-        <item row="0" column="0">
+-         <widget class="SinglePhotoView" name="viewPointEdit"/>
+-        </item>
+-       </layout>
+-      </widget>
+-      <widget class="QWidget" name="tabView">
+-       <attribute name="title">
+-        <string>View</string>
+-       </attribute>
+-       <layout class="QHBoxLayout" name="horizontalLayout">
+-        <item>
+-         <widget class="QGraphicsView" name="graphShow"/>
+-        </item>
+-       </layout>
+-      </widget>
+-     </widget>
+-    </item>
+-    <item row="0" column="1">
+-     <widget class="QFrame" name="frame">
+-      <property name="sizePolicy">
+-       <sizepolicy hsizetype="Minimum" vsizetype="Preferred">
+-        <horstretch>0</horstretch>
+-        <verstretch>0</verstretch>
+-       </sizepolicy>
+-      </property>
+-      <property name="maximumSize">
+-       <size>
+-        <width>250</width>
+-        <height>16777215</height>
+-       </size>
+-      </property>
+-      <property name="frameShape">
+-       <enum>QFrame::StyledPanel</enum>
+-      </property>
+-      <property name="frameShadow">
+-       <enum>QFrame::Raised</enum>
+-      </property>
+-      <layout class="QGridLayout" name="gridLayout">
+-       <item row="1" column="0">
+-        <widget class="QLabel" name="label">
+-         <property name="text">
+-          <string>Deform Alg</string>
+-         </property>
+-        </widget>
+-       </item>
+-       <item row="1" column="2" colspan="2">
+-        <widget class="QComboBox" name="cmbDeformAlg">
+-         <property name="sizePolicy">
+-          <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+-           <horstretch>0</horstretch>
+-           <verstretch>0</verstretch>
+-          </sizepolicy>
+-         </property>
+-         <item>
+-          <property name="text">
+-           <string>MLS Similarity</string>
+-          </property>
+-         </item>
+-         <item>
+-          <property name="text">
+-           <string>MLS Rigid</string>
+-          </property>
+-         </item>
+-         <item>
+-          <property name="text">
+-           <string>Piecewise Affine</string>
+-          </property>
+-         </item>
+-        </widget>
+-       </item>
+-       <item row="2" column="0" colspan="2">
+-        <widget class="QLabel" name="label_2">
+-         <property name="text">
+-          <string>Alpha Value</string>
+-         </property>
+-        </widget>
+-       </item>
+-       <item row="2" column="2">
+-        <widget class="QDoubleSpinBox" name="spinAlpha">
+-         <property name="sizePolicy">
+-          <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+-           <horstretch>0</horstretch>
+-           <verstretch>0</verstretch>
+-          </sizepolicy>
+-         </property>
+-         <property name="decimals">
+-          <number>1</number>
+-         </property>
+-         <property name="minimum">
+-          <double>0.100000000000000</double>
+-         </property>
+-         <property name="maximum">
+-          <double>3.000000000000000</double>
+-         </property>
+-         <property name="singleStep">
+-          <double>0.100000000000000</double>
+-         </property>
+-         <property name="value">
+-          <double>1.000000000000000</double>
+-         </property>
+-        </widget>
+-       </item>
+-       <item row="3" column="0">
+-        <widget class="QLabel" name="label_3">
+-         <property name="text">
+-          <string>Grid Size</string>
+-         </property>
+-        </widget>
+-       </item>
+-       <item row="3" column="2">
+-        <widget class="QSlider" name="SldGrid">
+-         <property name="minimum">
+-          <number>1</number>
+-         </property>
+-         <property name="maximum">
+-          <number>20</number>
+-         </property>
+-         <property name="value">
+-          <number>5</number>
+-         </property>
+-         <property name="orientation">
+-          <enum>Qt::Horizontal</enum>
+-         </property>
+-        </widget>
+-       </item>
+-       <item row="3" column="3" colspan="2">
+-        <widget class="QLabel" name="label_5">
+-         <property name="text">
+-          <string>5</string>
+-         </property>
+-        </widget>
+-       </item>
+-       <item row="4" column="0">
+-        <widget class="QLabel" name="label_4">
+-         <property name="text">
+-          <string>Interp Alg</string>
+-         </property>
+-        </widget>
+-       </item>
+-       <item row="4" column="2">
+-        <widget class="QComboBox" name="cmbInterpAlg">
+-         <item>
+-          <property name="text">
+-           <string>Bilinear</string>
+-          </property>
+-         </item>
+-         <item>
+-          <property name="text">
+-           <string>Nearest</string>
+-          </property>
+-         </item>
+-        </widget>
+-       </item>
+-       <item row="5" column="0">
+-        <widget class="QLabel" name="label_6">
+-         <property name="text">
+-          <string>Opacity</string>
+-         </property>
+-        </widget>
+-       </item>
+-       <item row="5" column="1" colspan="3">
+-        <widget class="QSlider" name="SldOpacity">
+-         <property name="enabled">
+-          <bool>true</bool>
+-         </property>
+-         <property name="maximum">
+-          <number>100</number>
+-         </property>
+-         <property name="value">
+-          <number>50</number>
+-         </property>
+-         <property name="orientation">
+-          <enum>Qt::Horizontal</enum>
+-         </property>
+-        </widget>
+-       </item>
+-       <item row="5" column="4">
+-        <widget class="QLabel" name="label_7">
+-         <property name="enabled">
+-          <bool>false</bool>
+-         </property>
+-         <property name="text">
+-          <string>50</string>
+-         </property>
+-        </widget>
+-       </item>
+-       <item row="6" column="2" colspan="2">
+-        <widget class="QCheckBox" name="chkPreview">
+-         <property name="text">
+-          <string>Preview</string>
+-         </property>
+-         <property name="checked">
+-          <bool>true</bool>
+-         </property>
+-        </widget>
+-       </item>
+-       <item row="0" column="0" colspan="5">
+-        <widget class="QLabel" name="label_8">
+-         <property name="text">
+-          <string>&lt;!DOCTYPE HTML PUBLIC &quot;-//W3C//DTD HTML 4.0//EN&quot; &quot;http://www.w3.org/TR/REC-html40/strict.dtd&quot;&gt;
+-&lt;html&gt;&lt;head&gt;&lt;meta name=&quot;qrichtext&quot; content=&quot;1&quot; /&gt;&lt;style type=&quot;text/css&quot;&gt;
+-p, li { white-space: pre-wrap; }
+-&lt;/style&gt;&lt;/head&gt;&lt;body style=&quot; font-family:'DejaVu Sans'; font-size:11pt; font-weight:400; font-style:normal;&quot;&gt;
+-&lt;p style=&quot; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;&quot;&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Add Points:&lt;/span&gt; Ctrl+Click&lt;/p&gt;
+-&lt;p style=&quot; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;&quot;&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Remove Last:&lt;/span&gt; Shift+Click&lt;/p&gt;
+-&lt;p style=&quot; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;&quot;&gt;Left button   -- target&lt;/p&gt;
+-&lt;p style=&quot; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;&quot;&gt;Right button --  source&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+-         </property>
+-        </widget>
+-       </item>
+-      </layout>
+-     </widget>
+-    </item>
+-    <item row="1" column="1">
+-     <widget class="QPushButton" name="pushButton">
+-      <property name="text">
+-       <string>View Result</string>
+-      </property>
+-     </widget>
+-    </item>
+-   </layout>
+-  </widget>
+-  <widget class="QMenuBar" name="menubar">
+-   <property name="geometry">
+-    <rect>
+-     <x>0</x>
+-     <y>0</y>
+-     <width>666</width>
+-     <height>27</height>
+-    </rect>
+-   </property>
+-   <widget class="QMenu" name="menu">
+-    <property name="title">
+-     <string>&amp;Points</string>
+-    </property>
+-    <addaction name="actClearAllPt"/>
+-    <addaction name="actCpSrcPtToDst"/>
+-   </widget>
+-   <widget class="QMenu" name="menu_2">
+-    <property name="title">
+-     <string>&amp;File</string>
+-    </property>
+-    <addaction name="actNewProj"/>
+-    <addaction name="actOpenProj"/>
+-    <addaction name="actSaveProj"/>
+-    <addaction name="actSaveProjAs"/>
+-    <addaction name="actExportPic"/>
+-    <addaction name="separator"/>
+-    <addaction name="actExit"/>
+-   </widget>
+-   <addaction name="menu_2"/>
+-   <addaction name="menu"/>
+-  </widget>
+-  <widget class="QStatusBar" name="statusbar"/>
+-  <action name="actCpSrcPtToDst">
+-   <property name="text">
+-    <string>Set Target Points = Source Points</string>
+-   </property>
+-  </action>
+-  <action name="actClearAllPt">
+-   <property name="text">
+-    <string>&amp;Clear All Points</string>
+-   </property>
+-  </action>
+-  <action name="actNewProj">
+-   <property name="text">
+-    <string>&amp;New...</string>
+-   </property>
+-  </action>
+-  <action name="actOpenProj">
+-   <property name="text">
+-    <string>&amp;Open...</string>
+-   </property>
+-   <property name="shortcut">
+-    <string>Ctrl+O</string>
+-   </property>
+-  </action>
+-  <action name="actSaveProj">
+-   <property name="text">
+-    <string>&amp;Save...</string>
+-   </property>
+-  </action>
+-  <action name="actSaveProjAs">
+-   <property name="text">
+-    <string>Save &amp;as...</string>
+-   </property>
+-  </action>
+-  <action name="actExportPic">
+-   <property name="text">
+-    <string>&amp;Export...</string>
+-   </property>
+-  </action>
+-  <action name="actExit">
+-   <property name="text">
+-    <string>E&amp;xit</string>
+-   </property>
+-  </action>
+- </widget>
+- <customwidgets>
+-  <customwidget>
+-   <class>SinglePhotoView</class>
+-   <extends>QGraphicsView</extends>
+-   <header>singlephotoview.h</header>
+-   <slots>
+-    <signal>pointsUpdated()</signal>
+-   </slots>
+-  </customwidget>
+- </customwidgets>
+- <resources/>
+- <connections>
+-  <connection>
+-   <sender>viewPointEdit</sender>
+-   <signal>pointsUpdated()</signal>
+-   <receiver>DeformWin</receiver>
+-   <slot>updateEditImg()</slot>
+-   <hints>
+-    <hint type="sourcelabel">
+-     <x>211</x>
+-     <y>270</y>
+-    </hint>
+-    <hint type="destinationlabel">
+-     <x>226</x>
+-     <y>320</y>
+-    </hint>
+-   </hints>
+-  </connection>
+-  <connection>
+-   <sender>spinAlpha</sender>
+-   <signal>valueChanged(double)</signal>
+-   <receiver>DeformWin</receiver>
+-   <slot>updateEditImg()</slot>
+-   <hints>
+-    <hint type="sourcelabel">
+-     <x>616</x>
+-     <y>193</y>
+-    </hint>
+-    <hint type="destinationlabel">
+-     <x>282</x>
+-     <y>26</y>
+-    </hint>
+-   </hints>
+-  </connection>
+-  <connection>
+-   <sender>SldGrid</sender>
+-   <signal>valueChanged(int)</signal>
+-   <receiver>DeformWin</receiver>
+-   <slot>updateEditImg()</slot>
+-   <hints>
+-    <hint type="sourcelabel">
+-     <x>616</x>
+-     <y>221</y>
+-    </hint>
+-    <hint type="destinationlabel">
+-     <x>357</x>
+-     <y>318</y>
+-    </hint>
+-   </hints>
+-  </connection>
+-  <connection>
+-   <sender>cmbDeformAlg</sender>
+-   <signal>currentIndexChanged(int)</signal>
+-   <receiver>DeformWin</receiver>
+-   <slot>updateEditImg()</slot>
+-   <hints>
+-    <hint type="sourcelabel">
+-     <x>622</x>
+-     <y>159</y>
+-    </hint>
+-    <hint type="destinationlabel">
+-     <x>564</x>
+-     <y>319</y>
+-    </hint>
+-   </hints>
+-  </connection>
+-  <connection>
+-   <sender>SldGrid</sender>
+-   <signal>valueChanged(int)</signal>
+-   <receiver>label_5</receiver>
+-   <slot>setNum(int)</slot>
+-   <hints>
+-    <hint type="sourcelabel">
+-     <x>616</x>
+-     <y>221</y>
+-    </hint>
+-    <hint type="destinationlabel">
+-     <x>646</x>
+-     <y>221</y>
+-    </hint>
+-   </hints>
+-  </connection>
+-  <connection>
+-   <sender>chkPreview</sender>
+-   <signal>toggled(bool)</signal>
+-   <receiver>SldOpacity</receiver>
+-   <slot>setEnabled(bool)</slot>
+-   <hints>
+-    <hint type="sourcelabel">
+-     <x>622</x>
+-     <y>312</y>
+-    </hint>
+-    <hint type="destinationlabel">
+-     <x>622</x>
+-     <y>283</y>
+-    </hint>
+-   </hints>
+-  </connection>
+-  <connection>
+-   <sender>chkPreview</sender>
+-   <signal>toggled(bool)</signal>
+-   <receiver>DeformWin</receiver>
+-   <slot>updateEditImg()</slot>
+-   <hints>
+-    <hint type="sourcelabel">
+-     <x>622</x>
+-     <y>312</y>
+-    </hint>
+-    <hint type="destinationlabel">
+-     <x>358</x>
+-     <y>344</y>
+-    </hint>
+-   </hints>
+-  </connection>
+-  <connection>
+-   <sender>SldOpacity</sender>
+-   <signal>valueChanged(int)</signal>
+-   <receiver>DeformWin</receiver>
+-   <slot>updateEditImg()</slot>
+-   <hints>
+-    <hint type="sourcelabel">
+-     <x>622</x>
+-     <y>283</y>
+-    </hint>
+-    <hint type="destinationlabel">
+-     <x>372</x>
+-     <y>365</y>
+-    </hint>
+-   </hints>
+-  </connection>
+-  <connection>
+-   <sender>chkPreview</sender>
+-   <signal>toggled(bool)</signal>
+-   <receiver>label_7</receiver>
+-   <slot>setEnabled(bool)</slot>
+-   <hints>
+-    <hint type="sourcelabel">
+-     <x>548</x>
+-     <y>293</y>
+-    </hint>
+-    <hint type="destinationlabel">
+-     <x>646</x>
+-     <y>283</y>
+-    </hint>
+-   </hints>
+-  </connection>
+-  <connection>
+-   <sender>SldOpacity</sender>
+-   <signal>valueChanged(int)</signal>
+-   <receiver>label_7</receiver>
+-   <slot>setNum(int)</slot>
+-   <hints>
+-    <hint type="sourcelabel">
+-     <x>622</x>
+-     <y>283</y>
+-    </hint>
+-    <hint type="destinationlabel">
+-     <x>646</x>
+-     <y>283</y>
+-    </hint>
+-   </hints>
+-  </connection>
+- </connections>
+- <slots>
+-  <slot>updateEditImg()</slot>
+- </slots>
+-</ui>
+diff --git a/src/demo/demo.kdev4 b/src/demo/demo.kdev4
+deleted file mode 100644
+index d805e1a..0000000
+--- a/src/demo/demo.kdev4
++++ /dev/null
+@@ -1,4 +0,0 @@
+-[Project]
+-Name=demo
+-Manager=KDevCMakeManager
+-VersionControl=
+diff --git a/src/demo/main.cpp b/src/demo/main.cpp
+index b3b11ad..f6f9df2 100644
+--- a/src/demo/main.cpp
++++ b/src/demo/main.cpp
+@@ -1,16 +1,57 @@
+-#include <QtGui/QApplication>
+-
+ #include <iostream>
+-#include "deformwin.h"
++#include <fstream>
++
++#include "imgwarp_mls.h"
++
++#include <vector>
++#include <cv.h>
+ 
+-using std::cout;
+-using std::endl;
++#include "imgwarp_piecewiseaffine.h"
++#include "imgwarp_mls_rigid.h"
++#include "imgwarp_mls_similarity.h"
++#include "highgui.h"
++
++using namespace std;
+ 
+ int main(int argc, char *argv[])
+ {
+-    QApplication a(argc, argv);
+-    DeformWin w;
++	ImgWarp_MLS *imgTrans;
++
++	imgTrans = new ImgWarp_MLS_Similarity();
++	
++	// imgTrans = new ImgWarp_MLS_Rigid();
++
++	// imgTrans = new ImgWarp_PieceWiseAffine();
++	// ((ImgWarp_PieceWiseAffine *)imgTrans)->backGroundFillAlg = ImgWarp_PieceWiseAffine::BGMLS;
++	
++	ifstream points(argv[1]);
++
++	vector<cv::Point2i> srcPoints, dstPoints;
++
++	while (true) {
++		int x1, y1, x2, y2;
++		points >> x1 >> y1 >> x2 >> y2;
++		if (points.eof()) {
++			break;
++		}
++		x1 *= 4.65695;
++		y1 *= 4.51925;
++		srcPoints.push_back({x1, y1});
++		dstPoints.push_back({x2, y2});
++	}
++
++	for (int i = 2; i < argc; i++) {
++		cout << argv[i] << endl;
++		Mat oriImg = cv::imread(argv[i]);
++		Mat oriImgResized;
++		cv::resize(oriImg, oriImgResized, {5756, 7276});
++
++		Mat curImg = imgTrans->setAllAndGenerate(
++				oriImgResized,
++				srcPoints,
++				dstPoints,
++				oriImgResized.cols, oriImgResized.rows, 1);
+ 
+-    w.show();
+-    return a.exec();
++		cv::imwrite(string("morphed_") + argv[i], curImg);
++	}
+ }
+diff --git a/src/demo/myimage.cpp b/src/demo/myimage.cpp
+deleted file mode 100644
+index 4555d06..0000000
+--- a/src/demo/myimage.cpp
++++ /dev/null
+@@ -1,308 +0,0 @@
+-#include "myimage.h"
+-#include <QColor>
+-
+-MyImage::MyImage() : QImage() {
+-    pt = NULL;
+-    u1 = NULL;
+-    u2 = NULL;
+-    u3 = NULL;
+-}
+-
+-MyImage::MyImage(const QString &fileName, const char *format)
+-    : QImage(fileName, format) {
+-    pt = NULL;
+-    u1 = NULL;
+-    u2 = NULL;
+-    u3 = NULL;
+-}
+-MyImage::MyImage(const char *fileName, const char *format)
+-    : QImage(fileName, format) {
+-    pt = NULL;
+-    u1 = NULL;
+-    u2 = NULL;
+-    u3 = NULL;
+-}
+-MyImage::MyImage(const QImage &image) : QImage(image) {
+-    pt = NULL;
+-    u1 = NULL;
+-    u2 = NULL;
+-    u3 = NULL;
+-}
+-/*
+-MyImage::MyImage ( const MyImage & image ):QImage(image){
+-    pt=NULL;u1=NULL;u2=NULL;u3=NULL;
+-}*/
+-MyImage::MyImage(uchar *data,int width,int height,Format format):QImage(data,width,height,format){
+-}
+-void MyImage::setPixelRGB(int x, int y, float r, float g, float b) {
+-    if (r < 0) r = 0;
+-    if (g < 0) g = 0;
+-    if (b < 0) b = 0;
+-    if (r > 255) r = 255;
+-    if (g > 255) g = 255;
+-    if (b > 255) b = 255;
+-    QRgb value = qRgb((int)r, (int)g, (int)b);
+-    setPixel(x, y, value);
+-}
+-void MyImage::setPixelYUV(int x, int y, float Y, float u, float v) {
+-    if (Y < 0) Y = 0;
+-    if (Y > 255) Y = 255;
+-    if (u < -111.18) u = -111.18;
+-    if (u > 111.18) u = 111.18;
+-    if (v < -156.825) v = -156.825;
+-    if (v > 156.825) v = 156.825;
+-    float r = Y + 1.14 * v;
+-    float g = Y - 0.395 * u - 0.581 * v;
+-    float b = Y + 2.032 * u;
+-    setPixelRGB(x, y, r, g, b);
+-}
+-void MyImage::RGB2YUV(float r, float g, float b, float &y, float &u, float &v) {
+-    y = 0.299 * r + 0.587 * g + 0.114 * b;
+-    u = 0.492 * (b - y);
+-    v = 0.877 * (r - y);
+-    return;
+-}
+-void MyImage::YUV2RGB(float y, float u, float v, float &r, float &g, float &b) {
+-    r = y + 1.14 * v;
+-    g = y - 0.395 * u - 0.581 * v;
+-    b = y + 2.032 * u;
+-    return;
+-}
+-void MyImage::init() {
+-    pt = bits();
+-    QSize isize = size();
+-    int TotalBits = isize.width() * isize.height();
+-    u1 = new uchar[TotalBits];
+-    u2 = new uchar[TotalBits];
+-    u3 = new uchar[TotalBits];
+-    int i;
+-    for (i = 0; i < TotalBits * 4; i++) {
+-        if (i % 4 == 0) {
+-            u1[i / 4] = pt[i];
+-        } else if (i % 4 == 1) {
+-            u2[i / 4] = pt[i];
+-        } else if (i % 4 == 2) {
+-            u3[i / 4] = pt[i];
+-        } else {
+-            ;
+-        }
+-    }
+-}
+-
+-// Convert IplImage to QImage
+-MyImage MyImage::fromIplImage(const IplImage * iplImage,double mini, double maxi){
+-    uchar *qImageBuffer = NULL;
+-    int width = iplImage->width;
+-
+-/* Note here that OpenCV image is stored so that each lined is
+-32-bits aligned thus
+-* explaining the necessity to "skip" the few last bytes of each
+-line of OpenCV image buffer.
+-*/
+-    int widthStep = iplImage->widthStep;
+-    int height = iplImage->height;
+-
+-    switch (iplImage->depth)
+-    {
+-        case IPL_DEPTH_8U:
+-            if(iplImage->nChannels == 1)
+-            {
+-            /* OpenCV image is stored with one byte grey pixel. We convert it
+-            to an 8 bit depth QImage.
+-            */
+-                qImageBuffer = (uchar *) malloc(width*height*4*sizeof(uchar));
+-                uchar *QImagePtr = qImageBuffer;
+-                const uchar *iplImagePtr = (const uchar *) iplImage->imageData;
+-                for(int y = 0; y < height; y++) {
+-                    for (int x = 0; x < width; x++) {
+-                        // We cannot help but copy manually.
+-                        QImagePtr[0] = iplImagePtr[0];
+-                        QImagePtr[1] = iplImagePtr[0];
+-                        QImagePtr[2] = iplImagePtr[0];
+-                        QImagePtr[3] = 0;
+-
+-                        QImagePtr += 4;
+-                        iplImagePtr ++;
+-                    }
+-                    iplImagePtr += widthStep-width;
+-                }
+-            }
+-            else if(iplImage->nChannels == 3)
+-            {
+-                /* OpenCV image is stored with 3 byte color pixels (3 channels).
+-                    We convert it to a 32 bit depth QImage.
+-                */
+-                qImageBuffer = (uchar *) malloc(width*height*4*sizeof(uchar));
+-                uchar *QImagePtr = qImageBuffer;
+-                const uchar *iplImagePtr = (const uchar *) iplImage->imageData;
+-                for(int y = 0; y < height; y++) {
+-                    for (int x = 0; x < width; x++) {
+-                        // We cannot help but copy manually.
+-                        QImagePtr[0] = iplImagePtr[0];
+-                        QImagePtr[1] = iplImagePtr[1];
+-                        QImagePtr[2] = iplImagePtr[2];
+-                        QImagePtr[3] = 0;
+-
+-                        QImagePtr += 4;
+-                        iplImagePtr += 3;
+-                    }
+-                    iplImagePtr += widthStep-3*width;
+-                }
+-            }
+-            else{
+-                    qDebug("IplImageToQImage: image format is not supported : depth=8U and %d channels ", iplImage->nChannels);
+-            }
+-            break;
+-        case IPL_DEPTH_16U:
+-            if(iplImage->nChannels == 1)
+-            {
+-            /* OpenCV image is stored with 2 bytes grey pixel. We convert it
+-            to an 8 bit depth QImage.
+-            */
+-                qImageBuffer = (uchar *) malloc(width*height*sizeof(uchar));
+-                uchar *QImagePtr = qImageBuffer;
+-                    //const uint16_t *iplImagePtr = (const uint16_t *);
+-                const unsigned int *iplImagePtr = (const unsigned int *)iplImage->imageData;
+-                for (int y = 0; y < height; y++){
+-                    for (int x = 0; x < width; x++){
+-                        // We take only the highest part of the 16 bit value. It is
+-                        //similar to dividing by 256.
+-                            *QImagePtr++ = ((*iplImagePtr++) >> 8);
+-                    }
+-                    iplImagePtr += widthStep/sizeof(unsigned int)-width;
+-                }
+-            }
+-            else{
+-                qDebug("IplImageToQImage: image format is not supported : depth=16U and %d channels ", iplImage->nChannels);
+-            }
+-            break;
+-        case IPL_DEPTH_32F:
+-             if(iplImage->nChannels == 1)
+-             {
+-             /* OpenCV image is stored with float (4 bytes) grey pixel. We
+-            convert it to an 8 bit depth QImage.
+-            */
+-                 qImageBuffer = (uchar *)malloc(width * height * sizeof(uchar));
+-                 uchar *QImagePtr = qImageBuffer;
+-                 const float *iplImagePtr = (const float *)iplImage->imageData;
+-                 for (int y = 0; y < height; y++) {
+-                     for (int x = 0; x < width; x++) {
+-                         uchar p;
+-                         float pf =
+-                             255 * ((*iplImagePtr++) - mini) / (maxi - mini);
+-                         if (pf < 0)
+-                             p = 0;
+-                         else if (pf > 255)
+-                             p = 255;
+-                         else
+-                             p = (uchar)pf;
+-
+-                         *QImagePtr++ = p;
+-                     }
+-                     iplImagePtr += widthStep / sizeof(float) - width;
+-                 }
+-             } else {
+-                     qDebug("IplImageToQImage: image format is not supported : depth=32F and %d channels ", iplImage->nChannels);
+-             }
+-             break;
+-        case IPL_DEPTH_64F:
+-             if(iplImage->nChannels == 1){
+-                /* OpenCV image is stored with double (8 bytes) grey pixel. We
+-                convert it to an 8 bit depth QImage.
+-                */
+-                qImageBuffer = (uchar *) malloc(width*height*sizeof(uchar));
+-                uchar *QImagePtr = qImageBuffer;
+-                const double *iplImagePtr = (const double *) iplImage->imageData;
+-                for(int y = 0; y < height; y++){
+-                    for(int x = 0; x < width; x++){
+-                        uchar p;
+-                        double pf = 255 * ((*iplImagePtr++) - mini) / (maxi - mini);
+-
+-                        if(pf < 0) p = 0;
+-                        else if(pf > 255) p = 255;
+-                        else p = (uchar) pf;
+-
+-                        *QImagePtr++ = p;
+-                    }
+-                    iplImagePtr += widthStep/sizeof(double)-width;
+-                }
+-            }
+-            else{
+-                qDebug("IplImageToQImage: image format is not supported : depth=64F and %d channels ", iplImage->nChannels);
+-            }
+-            break;
+-        default:
+-                qDebug("IplImageToQImage: image format is not supported : depth=%d and %d channels ", iplImage->depth, iplImage->nChannels);
+-    }
+-
+-
+-    MyImage qImage;
+-    QVector<QRgb> vcolorTable;
+-    /*
+-    if(iplImage->nChannels == 1)
+-    {
+-        // We should check who is going to destroy this allocation.
+-        for(int i = 0; i < 256; i++)
+-        {
+-            vcolorTable.push_back( qRgb(i, i, i) );
+-        }
+-        qImage = MyImage(qImageBuffer, width, height, QImage::Format_Indexed8).copy();
+-        qImage.setColorTable(vcolorTable);
+-    }
+-    else
+-    {*/
+-        qImage = MyImage(qImageBuffer, width, height, QImage::Format_RGB32).copy();
+-    //}
+-    free(qImageBuffer);
+-    return qImage;
+-}
+-
+-MyImage MyImage::fusionTwoImages(const MyImage &img1, const MyImage &img2,
+-                                 double r) {
+-    QImage qi;
+-    qi = img1.copy();
+-    int i, j;
+-    QColor q1, q2;
+-    for (i = 0; i < qi.width(); i++)
+-        for (j = 0; j < qi.height(); j++) {
+-            q1 = img1.pixel(i, j);
+-            q2 = img2.pixel(i, j);
+-            qi.setPixel(i, j,
+-                        (QColor(q1.red() * r + q2.red() * (1 - r),
+-                                q1.green() * r + q2.green() * (1 - r),
+-                                q1.blue() * r + q2.blue() * (1 - r))).rgb());
+-        }
+-    return qi;
+-}
+-
+-IplImage *MyImage::toIplImage() const {
+-    int width = this->width();
+-    int height = this->height();
+-
+-    CvSize Size;
+-    Size.height = height;
+-    Size.width = width;
+-
+-    IplImage *charIplImageBuffer = cvCreateImage(Size, IPL_DEPTH_8U, 1);
+-    char *charTemp = (char *)charIplImageBuffer->imageData;
+-
+-    for (int y = 0; y < height; ++y) {
+-        for (int x = 0; x < width; ++x) {
+-            int index = y * width + x;
+-            charTemp[index] = (char)qGray(this->pixel(x, y));
+-        }
+-    }
+-
+-    return charIplImageBuffer;
+-}
+-
+-MyImage MyImage::fromMat(const Mat &m, double mini, double maxi) {
+-    const IplImage mImg(m);
+-    return fromIplImage(&mImg, mini, maxi);
+-}
+-
+-vector<cv::Point2i> getVcvPoint(const QList<QPoint> &qL) {
+-    vector<cv::Point2i> vL;
+-    foreach (QPoint qp, qL) { vL.push_back(cv::Point2i(qp.x(), qp.y())); }
+-    return vL;
+-}
+diff --git a/src/demo/myimage.h b/src/demo/myimage.h
+deleted file mode 100644
+index 7da5be8..0000000
+--- a/src/demo/myimage.h
++++ /dev/null
+@@ -1,42 +0,0 @@
+-#ifndef MYIMAGE_H
+-#define MYIMAGE_H
+-
+-#include <QImage>
+-#include <vector>
+-#include <cv.h>
+-using cv::Mat;
+-using cv::vector;
+-
+-class MyImage : public QImage
+-{
+-public:
+-    MyImage();
+-    MyImage ( const QString & fileName, const char * format = 0 );
+-    MyImage ( const char * fileName, const char * format = 0 );
+-    MyImage ( const QImage & image );
+-    MyImage(uchar *data,int width,int height,Format format);
+-    void setPixelRGB(int x,int y,float r,float g,float b);
+-    void setPixelYUV(int x,int y,float Y,float u,float v);
+-    static void YUV2RGB(float y,float u,float v,float &r,float &g,float &b);
+-    static void RGB2YUV(float r,float g,float b,float &y,float &u,float &v);
+-
+-
+-    IplImage * toIplImage() const;
+-
+-    static MyImage fromIplImage(const IplImage * iplImage,double mini=0, double maxi=0);
+-
+-	//! Convert from OpenCV 2.x Mat
+-    static MyImage fromMat(const Mat &m, double mini=0, double maxi=0);
+-
+-    static MyImage fusionTwoImages(const MyImage & img1, const MyImage &img2, double r);
+-
+-private:
+-    uchar *pt;
+-    uchar *u1,*u2,*u3;
+-
+-    void init();
+-};
+-
+-//! QList< QPoint > to cvPoint list
+-vector<cv::Point2i> getVcvPoint(const QList< QPoint > &qL);
+-#endif // MYIMAGE_H
+diff --git a/src/demo/pointspaint.cpp b/src/demo/pointspaint.cpp
+deleted file mode 100644
+index 4a35d63..0000000
+--- a/src/demo/pointspaint.cpp
++++ /dev/null
+@@ -1,174 +0,0 @@
+-#include "pointspaint.h"
+-#include <QPainter>
+-
+-PointsPaint::PointsPaint()
+-{
+-    mouseHighlightPoint = -1;
+-    selectedPoint = -1;
+-    boundRect.setCoords(0, 0, 0, 0);
+-    setZValue(1);
+-    setColorScheme(0);
+-}
+-
+-void PointsPaint::setColorScheme(int schemeId)
+-{
+-    if (schemeId == 0){
+-        colorBrush = Qt::magenta;
+-        colorSelectedPen = Qt::yellow;
+-        colorSelectedBrush = Qt::darkYellow;
+-        colorHighlightPen = Qt::blue;
+-        colorMirrorPen = Qt::darkRed;
+-        colorMirrorBrush = Qt::red;
+-        colorPen = Qt::black;
+-    }
+-    else {
+-        colorBrush = Qt::gray;
+-        colorSelectedPen = Qt::green;
+-        colorSelectedBrush = Qt::darkGreen;
+-        colorHighlightPen = Qt::red;
+-        colorMirrorPen = Qt::darkRed;
+-        colorMirrorBrush = Qt::red;
+-        colorPen = Qt::darkBlue;
+-    }
+-}
+-
+-QRectF PointsPaint::boundingRect() const{
+-    /*
+-    QList< QPoint >::iterator ci;
+-    for (ci = ql->begin(); ci != ql->end(); ci++){
+-        if ( ci->x() > boundRect.right() )
+-            boundRect.setRight(ci->x());
+-        if ( ci->x() < boundRect.left() )
+-            boundRect.setLeft(ci->x());
+-        if ( ci->y() > boundRect.bottom() )
+-            boundRect.setBottom(ci->y());
+-        if ( ci->y() < boundRect.top() )
+-            boundRect.setTop(ci->y());
+-    }
+-    qDebug("%d",boundRect.top());//<<" "<<boundingRect.top()<<endl;*/
+-    return (QRectF)boundRect;
+-}
+-
+-void PointsPaint::paint(QPainter *painter, const QStyleOptionGraphicsItem *,
+-    QWidget *){
+-    int i;
+-    QPen dPen;
+-    QBrush dBrush;
+-    dBrush.setStyle(Qt::SolidPattern);
+-    dBrush.setColor(colorBrush);
+-    painter->setBrush(dBrush);
+-
+-    //double ratio = this->(1,0).x()-this->mapFromScene(0, 0).x();
+-    //qDebug("%lf\n",ratio);
+-
+-    for (i = 0; i < ql.size(); i++){
+-        if (selectedPoint == i){
+-            dPen.setColor(colorSelectedPen);
+-            painter->setPen(dPen);
+-            dBrush.setColor(colorSelectedBrush);
+-            painter->setBrush(dBrush);
+-            painter->drawEllipse(QPointF(ql[i]), 4.*ratio, 4.*ratio);
+-            dBrush.setColor(colorBrush);
+-            painter->setBrush(dBrush);
+-        }
+-        else if (mouseHighlightPoint == i){
+-            dPen.setColor(colorHighlightPen);
+-            painter->setPen(dPen);
+-            painter->drawEllipse(QPointF(ql[i]), 4.*ratio, 4.*ratio);
+-        }
+-        else if (mirrorPoint == i){
+-            dPen.setColor(colorMirrorPen);
+-            painter->setPen(dPen);
+-            dBrush.setColor(colorMirrorBrush);
+-            painter->setBrush(dBrush);
+-            painter->drawEllipse(QPointF(ql[i]), 4.*ratio, 4.*ratio);
+-            dBrush.setColor(colorBrush);
+-            painter->setBrush(dBrush);
+-        }
+-        else {
+-            dPen.setColor(colorPen);
+-            painter->setPen(dPen);
+-            painter->drawEllipse(QPointF(ql[i]), 3.*ratio, 3.*ratio);
+-        }
+-    }
+-}
+-
+-// Pick a point by mouse. mouseP is in item coordination system.
+-int PointsPaint::pickPointByMouse(const QPointF &mouseP) const{
+-    double minD=1e10, dist;
+-    int i, minI;
+-
+-    for (i = 0; i < ql.size(); i++){
+-        dist = (mouseP.x() - ql[i].x())*(mouseP.x() - ql[i].x()) +
+-               (mouseP.y() - ql[i].y())*(mouseP.y() - ql[i].y());
+-        if ( dist<minD ) {
+-            minD = dist;
+-            minI = i;
+-        }
+-    }
+-    if (minD < 16*ratio*ratio)
+-        return minI;
+-    else
+-        return -1;
+-}
+-
+-void PointsPaint::highLight(int pId){
+-    if (mouseHighlightPoint != pId){
+-        mouseHighlightPoint = pId;
+-        this->update();
+-    }
+-}
+-
+-void PointsPaint::selectPoint(int pId){
+-    if (selectedPoint!=pId){
+-        selectedPoint = pId;
+-        mirrorPoint = -1;
+-        this->update();
+-    }
+-}
+-
+-
+-void PointsPaint::setMirrorPoint(int pId){
+-    if (mirrorPoint != pId){
+-        mirrorPoint = pId;
+-        selectedPoint = -1;
+-        this->update();
+-    }
+-}
+-
+-void PointsPaint::updateSelectedPoint(const QPointF &mouseP){
+-    QPoint qp = mouseP.toPoint();
+-    if (qp.x() != ql[selectedPoint].x() || qp.y() != ql[selectedPoint].y()){
+-        ql[selectedPoint] = qp;
+-        testUpdateRect(qp);
+-    }
+-    this->update();
+-}
+-
+-// Pick a point by mouse. mouseP is in item coordination system.
+-void PointsPaint::addPoint(const QPointF &mouseP) {
+-    ql.append(mouseP.toPoint());
+-    testUpdateRect(mouseP.toPoint());
+-    this->update();
+-}
+-
+-void PointsPaint::testUpdateRect(const QPoint &qp){
+-    bool needUpdate = false;
+-    if (qp.y()+3>boundRect.bottom())
+-        boundRect.setBottom(qp.y()+3), needUpdate=true;
+-    if (qp.x()+3>boundRect.right())
+-        boundRect.setRight(qp.x()+3), needUpdate=true;
+-    if (needUpdate)
+-        this->prepareGeometryChange();
+-}
+-
+-void PointsPaint::clear()
+-{
+-    ql.clear();
+-    mouseHighlightPoint = -1;
+-    selectedPoint = -1;
+-    boundRect.setCoords(0, 0, 0, 0);
+-    setZValue(1);
+-}
+-
+-#include "pointspaint.moc"
+\ No newline at end of file
+diff --git a/src/demo/pointspaint.h b/src/demo/pointspaint.h
+deleted file mode 100644
+index 5fd946e..0000000
+--- a/src/demo/pointspaint.h
++++ /dev/null
+@@ -1,60 +0,0 @@
+-#ifndef POINTSSHOW_H
+-#define POINTSSHOW_H
+-
+-#include <QObject>
+-#include <QGraphicsItem>
+-#include <QList>
+-#include <QPoint>
+-
+-class PointsPaint : public QObject, public QGraphicsItem
+-{
+-    Q_OBJECT
+-public:
+-    PointsPaint();
+-
+-    QRectF boundingRect() const;
+-    // QPainterPath shape() const;
+-    void paint(QPainter *painter, const QStyleOptionGraphicsItem *option,
+-                QWidget *widget);
+-
+-
+-    int pickPointByMouse(const QPointF &mouseP) const;
+-    int getSize() const{ return ql.size(); }
+-    void addPoint(const QPointF &mouseP);
+-
+-	//! Remove the last point
+-	void rmLastPoint(){ if (!ql.empty()) ql.removeLast(); };
+-    void updateSelectedPoint(const QPointF &mouseP);
+-
+-    void highLight(int pId);
+-    void selectPoint(int pId);
+-    void setMirrorPoint(int pId);
+-
+-    void setRatio(double r){ ratio = r; }
+-
+-    void clear();
+-    void setColorScheme(int schemeId);
+-
+-    QList< QPoint > getPointList() const { return ql; }
+-
+-private:
+-    int selectedPoint;
+-    int mirrorPoint;
+-    int mouseHighlightPoint;
+-
+-    QRect boundRect;
+-
+-    void testUpdateRect(const QPoint &qp);
+-
+-    QList< QPoint > ql;
+-
+-    // Colors
+-    QColor colorHighlightPen, colorHighlightBrush,
+-            colorSelectedPen, colorSelectedBrush,
+-            colorMirrorPen, colorMirrorBrush,
+-            colorPen, colorBrush;
+-
+-    double ratio;
+-};
+-
+-#endif // POINTSSHOW_H
+diff --git a/src/demo/projfile.cpp b/src/demo/projfile.cpp
+deleted file mode 100644
+index 77cf839..0000000
+--- a/src/demo/projfile.cpp
++++ /dev/null
+@@ -1,61 +0,0 @@
+-#include "projfile.h"
+-#include <QFile>
+-#include <QTextStream>
+-#include <QFileInfo>
+-
+-ProjFile::ProjFile()
+-{
+-}
+-
+-void ProjFile::save() {
+-    int i;
+-    QFile data(fileName);
+-    if (data.open(QFile::WriteOnly | QFile::Truncate)) {
+-        QTextStream out(&data);
+-
+-        // If the two files are in the same directory, use rel path
+-        if (QFileInfo(picSrc).path() == QFileInfo(fileName).path())
+-            out << QFileInfo(picSrc).fileName() << endl;
+-        else
+-            out << picSrc << endl;
+-
+-        out << qlSrc.size() << endl;
+-        for (i = 0; i < qlSrc.size(); i++)
+-            out << qlSrc[i].x() << " " << qlSrc[i].y() << endl;
+-        out << qlDest.size() << endl;
+-        for (i = 0; i < qlDest.size(); i++)
+-            out << qlDest[i].x() << " " << qlDest[i].y() << endl;
+-        data.close();
+-    }
+-}
+-
+-void ProjFile::open(QString fileN) {
+-    if (fileN == "")
+-        fileN = fileName;
+-    else
+-        fileName = fileN;
+-
+-    QFile data(fileName);
+-    int i, l;
+-    if (data.open(QFile::ReadOnly)) {
+-        QTextStream dataS(&data);
+-        picSrc = dataS.readLine();
+-        if (QFileInfo(picSrc).isRelative())
+-            picSrc = QFileInfo(fileName).path() + "/" + picSrc;
+-
+-        dataS >> l;
+-        int a, b;
+-        qlSrc.clear();
+-        qlDest.clear();
+-        for (i = 0; i < l; i++) {
+-            dataS >> a >> b;
+-            qlSrc.push_back(QPoint(a, b));
+-        }
+-        dataS >> l;
+-        for (i = 0; i < l; i++) {
+-            dataS >> a >> b;
+-            qlDest.push_back(QPoint(a, b));
+-        }
+-        data.close();
+-    }
+-}
+diff --git a/src/demo/projfile.h b/src/demo/projfile.h
+deleted file mode 100644
+index c401925..0000000
+--- a/src/demo/projfile.h
++++ /dev/null
+@@ -1,22 +0,0 @@
+-#ifndef PROJFILE_H
+-#define PROJFILE_H
+-
+-#include<QString>
+-#include<QList>
+-#include<QPoint>
+-
+-class ProjFile
+-{
+-public:
+-    QString picSrc;
+-    QList< QPoint > qlSrc, qlDest;
+-
+-    QString fileName;
+-
+-    void save();
+-    void open(QString fileN = "");
+-
+-    ProjFile();
+-};
+-
+-#endif // PROJFILE_H
+diff --git a/src/demo/singlephotoview.cpp b/src/demo/singlephotoview.cpp
+deleted file mode 100644
+index 75f3920..0000000
+--- a/src/demo/singlephotoview.cpp
++++ /dev/null
+@@ -1,151 +0,0 @@
+-#include "singlephotoview.h"
+-#include <QMouseEvent>
+-
+-SinglePhotoView::SinglePhotoView(QWidget *parent) :
+-    QGraphicsView(parent)
+-{
+-    setScene(&gScene);
+-    scaleFactor = 1;
+-    pixItem = NULL;
+-    dragging = false;
+-
+-    // this->scale(scaleFactor, scaleFactor);
+-    this->setRenderHint(QPainter::Antialiasing);
+-    this->setRenderHint(QPainter::SmoothPixmapTransform);
+-
+-    srcPointPaint.setColorScheme(0);
+-    dstPointPaint.setColorScheme(1);
+-    gScene.addItem(&srcPointPaint);
+-    gScene.addItem(&dstPointPaint);
+-    srcPointPaint.setRatio(this->mapToScene(1, 0).x()-this->mapToScene(0, 0).x());
+-    dstPointPaint.setRatio(this->mapToScene(1, 0).x()-this->mapToScene(0, 0).x());
+-}
+-
+-SinglePhotoView::~SinglePhotoView()
+-{
+-    gScene.removeItem(&srcPointPaint);
+-    gScene.removeItem(&dstPointPaint);
+-}
+-
+-void SinglePhotoView::zoomIn(){
+-    scaleFactor *= 1.2;
+-    this->scale(1.2, 1.2);
+-    this->setRenderHint(QPainter::SmoothPixmapTransform);
+-    srcPointPaint.setRatio(this->mapToScene(1, 0).x()-this->mapToScene(0, 0).x());
+-    dstPointPaint.setRatio(this->mapToScene(1, 0).x()-this->mapToScene(0, 0).x());
+-    this->update();
+-}
+-
+-void SinglePhotoView::zoomOut(){
+-    scaleFactor /= 1.2;
+-    this->scale(1/1.2, 1/1.2);
+-    srcPointPaint.setRatio(this->mapToScene(1, 0).x()-this->mapToScene(0, 0).x());
+-    dstPointPaint.setRatio(this->mapToScene(1, 0).x()-this->mapToScene(0, 0).x());
+-    this->update();
+-}
+-
+-void SinglePhotoView::mousePressEvent(QMouseEvent *event){
+-    QPointF qp = this->mapToScene(event->x(),event->y());
+-
+-    if (event->button()==Qt::LeftButton)
+-        pppCur = &dstPointPaint, pppOther = &srcPointPaint;
+-    else
+-        pppCur = &srcPointPaint, pppOther = &dstPointPaint;
+-
+-	// Shift+Click: Remove the last point
+-	if (event->modifiers() & Qt::ShiftModifier){
+-		pppCur->rmLastPoint();
+-        pppCur->selectPoint(-1);
+-        pppOther->setMirrorPoint(-1);
+-        emit pointsUpdated();
+-	}
+-
+-    int tI = pppCur->pickPointByMouse(qp);
+-    if (tI != -1){
+-        pppCur->selectPoint(tI);
+-        pppOther->setMirrorPoint(tI);
+-        dragging = true;
+-    }
+-    // Ctrl+Click: Add a point
+-    else if (event->modifiers() & Qt::ControlModifier) {
+-        pppCur->addPoint(qp);
+-        pppCur->selectPoint(-1);
+-        pppOther->setMirrorPoint(pppCur->getSize());
+-        emit pointsUpdated();
+-    }
+-}
+-
+-void SinglePhotoView::setImage(const QString & imgFileName)
+-{
+-    setImage(QPixmap(imgFileName));
+-}
+-
+-void SinglePhotoView::setImage(const QPixmap &img)
+-{
+-    if (pixItem != NULL){
+-        gScene.removeItem(pixItem);
+-        delete pixItem;
+-    }
+-
+-    pixData = img;
+-    pixItem = gScene.addPixmap(pixData);
+-    pixItem->setTransformationMode(Qt::SmoothTransformation);
+-
+-    this->setSceneRect(QRect(QPoint(0, 0), pixData.size()));
+-    gScene.setSceneRect(QRect(QPoint(0, 0), pixData.size()));
+-    this->update();
+-}
+-
+-void SinglePhotoView::mouseReleaseEvent(QMouseEvent *event)
+-{
+-    dragging = false;
+-}
+-
+-void SinglePhotoView::mouseMoveEvent(QMouseEvent *event)
+-{
+-    if ( dragging ){
+-        pppCur->updateSelectedPoint(this->mapToScene(event->pos()));
+-        emit pointsUpdated();
+-        return;
+-    }
+-    QPointF qp = this->mapToScene(event->x(),event->y());
+-    int tI;
+-    tI = srcPointPaint.pickPointByMouse(qp);
+-    srcPointPaint.highLight(tI);
+-    tI = dstPointPaint.pickPointByMouse(qp);
+-    dstPointPaint.highLight(tI);
+-    QGraphicsView::mouseMoveEvent(event);
+-}
+-
+-void SinglePhotoView::setPointList(
+-        const QList< QPoint > &qlSrc,
+-        const QList< QPoint > &qlDst){
+-    srcPointPaint.clear();
+-    dstPointPaint.clear();
+-    int i;
+-    for (i=0;i<qlSrc.size();i++)
+-        srcPointPaint.addPoint(QPointF(qlSrc[i]));
+-    for (i=0;i<qlDst.size();i++)
+-        dstPointPaint.addPoint(QPointF(qlDst[i]));
+-    emit pointsUpdated();
+-}
+-
+-void SinglePhotoView::copySrcPointsToDst()
+-{
+-    dstPointPaint.clear();
+-    QList< QPoint > qtemp = srcPointPaint.getPointList();
+-    for (int i=0;i<qtemp.size();i++)
+-        dstPointPaint.addPoint(QPointF(qtemp[i]));
+-    emit pointsUpdated();
+-    this->update();
+-}
+-
+-void SinglePhotoView::clearAllPoints()
+-{
+-    dstPointPaint.clear();
+-    srcPointPaint.clear();
+-    emit pointsUpdated();
+-    this->update();
+-}
+-
+-#include "singlephotoview.moc"
+diff --git a/src/demo/singlephotoview.h b/src/demo/singlephotoview.h
+deleted file mode 100644
+index 542911a..0000000
+--- a/src/demo/singlephotoview.h
++++ /dev/null
+@@ -1,50 +0,0 @@
+-#ifndef SINGLEPHOTOVIEW_H
+-#define SINGLEPHOTOVIEW_H
+-
+-#include <QGraphicsView>
+-#include "pointspaint.h"
+-
+-class SinglePhotoView : public QGraphicsView
+-{
+-Q_OBJECT
+-public:
+-    explicit SinglePhotoView(QWidget *parent = 0);
+-    ~SinglePhotoView();
+-
+-    void zoomIn();
+-    void zoomOut();
+-    void setImage(const QString & imgFileName);
+-    void setImage(const QPixmap & img);
+-    void setPointList(
+-            const QList< QPoint > &qlSrc,
+-            const QList< QPoint > &qlDst);
+-    void copySrcPointsToDst();
+-    void clearAllPoints();
+-    PointsPaint srcPointPaint, dstPointPaint;
+-signals:
+-    void pointsUpdated();
+-
+-public slots:
+-
+-protected:
+-    void mousePressEvent(QMouseEvent *event);
+-    void mouseReleaseEvent(QMouseEvent *event);
+-    void mouseMoveEvent(QMouseEvent *event);
+-
+-    QGraphicsScene gScene;
+-
+-    // QList< QPoint > selectedPoints;
+-
+-    double scaleFactor;
+-
+-private:
+-    bool dragging;
+-    PointsPaint *pppCur, *pppOther;
+-
+-    QString imageFileName;
+-
+-    QGraphicsPixmapItem *pixItem;
+-    QPixmap pixData;
+-};
+-
+-#endif // SINGLEPHOTOVIEW_H
